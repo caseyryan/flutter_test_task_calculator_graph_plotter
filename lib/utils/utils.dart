@@ -18,6 +18,9 @@ num clearTrailingZeroes(num value) {
   }
   return value;
 }
+int roundToNearest(int value, {int roundTo = 5}) {
+  return ((value.toDouble() / roundTo).round() * roundTo).toInt();
+}
 String toNumericString(String inputString, {bool allowPeriod = false}) {
   if (inputString == null) return '';
   var regExp = allowPeriod ? _digitRegex : _digitWithoutPeriodRegex;

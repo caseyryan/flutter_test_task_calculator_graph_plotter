@@ -1,8 +1,6 @@
 import 'dart:collection';
 import 'dart:math';
 
-import 'package:calculator_test/utils/utils.dart';
-
 // моя реализация алгоритма Shunting Yard 
 // на вход передаем математической выражение 
 // в колбеке ловим значение, или null, если его не удалось вывести
@@ -10,9 +8,9 @@ typedef OnExpressionResult = void Function(num result);
 
 class ExpressionParser {
 
-
   static final RegExp _spaceRegExp = RegExp(r'\s+');
   static final RegExp _digitRegExp = RegExp(r'[\.0-9]+');
+  final RegExp _digitWithoutPeriodRegex = RegExp(r'[0-9]+');
   static final RegExp _operatorRegExp = RegExp(r'[-*/+^()]+');
   static const String _sqrt = 'sqrt(';
 
@@ -31,7 +29,7 @@ class ExpressionParser {
       unknownValue: unknownValue,
       unknownVarName: unknownVarName
     );
-    // print(rawExpression);
+    print(rawExpression);
     return parseRawExpression(rawExpression);
   }
   /// рукурентно заменяет иксы на значение. Если перед иксом идет число, то добавляется знак *
@@ -40,12 +38,12 @@ class ExpressionParser {
     // грязный хак, чтобы научная запись не ломала вычисления
     // она в моем парсере не поддерживается. Дает не очень хорошую точность, но
     // достаточную для этой задачи
-    var shortString = unknownValue.toStringAsFixed(8);
+    var shortString = double.parse(unknownValue.toStringAsFixed(8));
     var stringBuffer = StringBuffer();
     for (var i = 0; i < equationExpression.length; i++) {
       var char = equationExpression[i];
       if (char == unknownVarName) {
-        if (i > 0 && isDigit(equationExpression[i - 1])) {
+        if (i > 0 && _isDigit(equationExpression[i - 1])) {
           stringBuffer.write('*');
           stringBuffer.write(shortString);
         } 
@@ -71,20 +69,89 @@ class ExpressionParser {
     if (!_hasDigits()) {
       return 0;
     } else {
-      if (mathExpression.contains(_sqrt)) {
-        _mathExpression = _precalculateSquareRoot(mathExpression);
+      if (_mathExpression.contains(_sqrt)) {
+        _mathExpression = _precalculateSquareRoot(_mathExpression);
       }
+      if (_mathExpression.contains('^')) {
+        _mathExpression = _precalculatePower(_mathExpression);
+      }
+      
       return _preProcess(_mathExpression);
     }
   }
 
   bool _hasDigits() {
     for (var i = 0; i < _mathExpression.length; i++) {
-      if (isDigit(_mathExpression[i], allowPeriod: false)) {
+      if (_isDigit(_mathExpression[i], allowPeriod: false)) {
         return true;
       }
     }
     return false;
+  }
+  /// предварительно делает все возведения в степень
+  /// чтобы упростить дальнейшие вычисления
+  String _precalculatePower(String expression) {
+    // print('INPUT EXPRESSION $expression');
+    if (expression.contains('^')) {
+      /// раздвигаем диапазон от положения ^ и ищем где выражение возведения
+      /// в степенть начинается и заканчивается
+      
+      var powIndex = expression.indexOf('^');
+      if (powIndex > -1) {
+        // var i = expression.length;
+        var startIndex = powIndex - 1;
+        var endIndex = powIndex + 1;
+        var startFound = false;
+        var endFound = false;
+        for (var i = powIndex -1; i >= 0; i--) {
+          var char = expression[i];
+          if (isOperator(char)) {
+            if (char == '-') {
+              startIndex = i;
+              startFound = true;
+            }
+            else {
+              startIndex = i + 1;
+              startFound = true;
+            }
+            break;
+          }
+        }
+        for (var i = powIndex +1; i < expression.length; i++) {
+          var char = expression[i];
+          if (isOperator(char)) {
+            if (i > 0) {
+              var prevChar = expression[i - 1];
+              if (prevChar != '^') {
+                endFound = true;
+                endIndex = i;
+                break;
+              }
+            } else {
+              endFound = true;
+              endIndex = i;
+              break;
+            }
+          }
+        }
+
+        print('START $startIndex END $endIndex');
+        if (startFound && endFound) {
+          var innerExpression = expression.substring(startIndex, endIndex);
+          if (innerExpression.isNotEmpty) {
+            var parser = ExpressionParser();
+            var result = parser._preProcess(innerExpression.toString());
+            var startPart = expression.substring(0, startIndex);
+            var endPart = endIndex > 0 ? expression.substring(endIndex, expression.length) : '';
+            var value = '$startPart${result}$endPart';
+            print('VLUE>>>>>>>> $value');
+            value = _precalculatePower(value);
+            return value;
+          }
+        }
+      }
+    }
+    return expression;
   }
 
   String _precalculateSquareRoot(String expression) {
@@ -125,10 +192,9 @@ class ExpressionParser {
           _queue.add(number);
           stringBuffer.clear();
         }
-        
 
         if (char == '-') {
-          if (_isNextOperatorPower(startIndex: i + 1, expression: expression)) {
+          if (_isUnaryMinus(startIndex: i + 1, expression: expression)) {
             // для правильного возведения в степень негативного числа
             stringBuffer.write(char);
             if (i == expression.length -1) {
@@ -142,23 +208,6 @@ class ExpressionParser {
         } else {
            _preprocessAddOperator(char);
         }
-          // не считаем минус отдельным оператором, а добавляем его в состав числа
-          // _preprocessAddOperator(char);
-        // } else {
-        //   stringBuffer.write(char);
-          // if (i == expression.length -1) {
-          //   var number = double.parse(stringBuffer.toString());
-          //   _queue.add(number);
-          //   stringBuffer.clear();
-          // }
-        // }
-          
-
-        // } else {
-        //   // если вначале стоит минус, то записываем как отрицательное число
-        //   stringBuffer.write(char);
-        // }
-        
       } 
       else if (_isDigit(char)) {
         stringBuffer.write(char);
@@ -172,23 +221,44 @@ class ExpressionParser {
     while (_stack.isNotEmpty) {
       _queue.add(_stack.removeLast());
     }
-
     _stack.clear();
     return _postProcess(_queue);
   }
-  /// если найден минус, но следующий оператор сразу после него будет 
-  /// возведение в степень, то минут нужно прикрепить к числу, а не добавлять 
-  /// в стек операторов, чтобы возведение в степень произошло правильно
-  bool _isNextOperatorPower({int startIndex = -1, String expression}) {
+  
+  bool _isUnaryMinus({int startIndex = -1, String expression}) {
     if (startIndex >= expression.length -1) return false;
     for (var i = startIndex; i < expression.length; i++) {
-      if (isOperator(expression[i])) {
-        var op = expression[i];
-        return op == '^';
+      if (_isDigit(expression[i])) {
+        return !_hasHigherPrecedenceOperatorNear(startIndex: i + 1, expression: expression);
+      } 
+      else if (expression[i] == '(') {
+        return false;
       }
     }
     return false;
   }
+  bool _hasHigherPrecedenceOperatorNear({int startIndex = -1, String expression}) {
+    if (startIndex >= 3) {
+      var prevChar = expression[startIndex - 3];
+      if (prevChar == '^') {
+        // чтобы разрешить возведение в отицательную степень
+        return false;
+      }
+    }
+
+    if (startIndex > expression.length -1) {
+      return true;
+    }
+    for (var i = startIndex; i < expression.length; i++) {
+      var ex = expression[i];
+      if (isOperator(expression[i])) {
+        return ex == '*' || ex == '/';
+      }
+    }
+    return true;
+  }
+
+
 
   void _preprocessAddOperator(dynamic op) {
     
@@ -219,6 +289,8 @@ class ExpressionParser {
           _stack.add(op);
         }
       }
+      // print('STACK $_stack');
+      // print('QUEUE $_queue');
     }
   }
 
@@ -226,6 +298,7 @@ class ExpressionParser {
     for (var i = 0; i < queue.length; i++) {
       _addToPostProcessStack(queue.elementAt(i));
     }
+    
     return _processResult();
   }
   num _processResult() {
@@ -255,6 +328,7 @@ class ExpressionParser {
       _stack.add(char);
     } else {
       if (char is! num) {
+        // добавление оператора
         if (_stack.last is num) {
           var last = _stack.removeLast();
           _evaluator.addSymbol(char);
@@ -283,6 +357,9 @@ class ExpressionParser {
         _stack.add(char);
       }
     }
+    print(_stack);
+
+
   }
   
 
@@ -308,9 +385,12 @@ class ExpressionParser {
   static bool isOperator(String value) {
     return _operatorRegExp.stringMatch(value) != null;
   }
-  bool _isDigit(String value) {
-    if (value == null || value.isEmpty) return false;
-    return _digitRegExp.stringMatch(value) != null;
+  bool _isDigit(String char, {bool allowPeriod = true}) {
+    if (char == null || char.isEmpty || char.length > 1) {
+    return false;
+    } 
+    var regExp = allowPeriod ? _digitRegExp : _digitWithoutPeriodRegex;
+    return regExp.stringMatch(char) != null;
   }
 }
 

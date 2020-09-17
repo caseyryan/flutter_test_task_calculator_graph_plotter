@@ -1,9 +1,7 @@
-import 'dart:math';
-
 import 'package:calculator_test/apis/wolfram_api.dart';
 import 'package:calculator_test/pages/calculator/calculator_button.dart';
 import 'package:calculator_test/pages/plotter/plotter_page.dart';
-import 'package:calculator_test/utils/expression_parser.dart';
+import 'package:calculator_test/pages/plotter/wolfram_plot_page.dart';
 import 'package:calculator_test/utils/function_scope_builder.dart';
 import 'package:calculator_test/utils/utils.dart';
 import 'package:flutter/material.dart';
@@ -24,7 +22,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
   FocusNode _minValFocusNode;
   FocusNode _maxValFocusNode;
   ThemeData _themeData;
-  ExpressionParser _expressionParser;
   List<String> _buttonValues = <String>[
     'C', 'sqrt(', '^', '<',
     '(', ')', 'x', '+',
@@ -40,7 +37,6 @@ class _CalculatorPageState extends State<CalculatorPage> {
 
   @override
   void initState() {
-    _expressionParser = ExpressionParser();
     _minValFocusNode = FocusNode();
     _maxValFocusNode = FocusNode();
     _calcInputController = TextEditingController();
@@ -105,16 +101,8 @@ class _CalculatorPageState extends State<CalculatorPage> {
     }
   }
 
-  void _plotFunction() {
-    // var result = _expressionParser.parseSimpleEquation(
-    //   equationExpression: _calcInputController.text,
-    //   unknownValue: -5,
-    //   unknownVarName: 'x'
-    // );
-    // print(result);
-
-    // return;
-
+  Future _plotFunction() async {
+    if (_isLoading) return;
     var minValue = double.tryParse(_minValueController.text);
     var maxValue = double.tryParse(_maxValueController.text);
     if (minValue == null || maxValue == null) {
@@ -135,69 +123,74 @@ class _CalculatorPageState extends State<CalculatorPage> {
       );
       return;
     }
-
-    var points = FunctionScopeBuilder.buildPointsForYofX(
-      equation: _calcInputController.text,
-      pointsToAddBetween: 100.0,
-      xMax: maxValue,
-      xMin: minValue
-    );
-    print(points);
-    var yDimentions = FunctionScopeBuilder.getCanvasVertivalDimentions(points);
-
-    if (yDimentions == null) {
+    if (_calcInputController.text.isEmpty) {
       showAlert(
-        'Недостаточно данных', 
+        'Не заполнено поле функции', 
         context
       );
       return;
     }
-    Navigator.of(context).push(MaterialPageRoute(
-        builder: (context) {
-          return PlotterPage(
-            verticalDimentions: yDimentions,
-            horizontalDimentions: Offset(minValue, maxValue),
-            points: points,
-          );
-        },
-        fullscreenDialog: true
-      ),
-    );
+    if (_useWolframApi) {
+      setState(() {
+        _isLoading = true;
+      });
+      var imageUrl = await WolframApi.plotAFunction(
+        expression: _calcInputController.text,
+        fromX: minValue,
+        toX: maxValue
+      );
+      if (imageUrl == null) {
+        showAlert('Не удалось произвести расчет', context);
+      }
+      else {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) {
+              return WolframPlotPage(
+                imageUrl: imageUrl,
+              );
+            },
+            fullscreenDialog: true
+          ),
+        );
+      }
+      setState(() {
+        _isLoading = false;
+      });
+
+    } else {
+      var points = FunctionScopeBuilder.buildPointsForYofX(
+        equation: _calcInputController.text,
+        pointsToAddBetween: 60.0,
+        xMax: maxValue,
+        xMin: minValue
+      );
+      print(points);
+      /// чтобы вписать функцию в определенный прямоугольник
+      /// получаем минимальное и максимальное значение по вертикали
+      var yDimentions = FunctionScopeBuilder.getCanvasVertivalDimentions(points);
+
+      if (yDimentions == null) {
+        showAlert(
+          'Недостаточно данных', 
+          context
+        );
+        return;
+      }
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) {
+            return PlotterPage(
+              verticalDimentions: yDimentions,
+              horizontalDimentions: Offset(minValue, maxValue),
+              points: points,
+            );
+          },
+          fullscreenDialog: true
+        ),
+      );
+    }
   }
-
-  // Future<void> _evaluate({
-  //   String expression,
-  //   bool extractSquareRoot = false
-  // }) async {
-  //   // var expression = _calcInputController.text;
-  //   if (expression.trim().isEmpty) {
-  //     showAlert('Не введена функция', context);
-  //     return;
-  //   }
-
-  //   if (_useWolframApi) {
-  //     _isLoading = true;
-  //     setState(() {});
-  //     var result = await WolframApi.evaluateApression(expression);
-  //     _minValueController.clear();
-  //     _isLoading = false;
-  //     setState(() {});
-  //     _displayResult(result);
-  //   } 
-  //   else {
-  //     var parser = ExpressionParser();
-  //     var result = parser.parseRawExpression(expression);
-  //     _displayResult(result);
-  //   }
-  // }
-
-  // void _displayResult(num result, {bool extractSquareRoot = false}) {
-  //   if (result == null) {
-  //     _calcInputController.text = 'Error';
-  //   } else {
-  //     _calcInputController.text = clearTrailingZeroes(result).toString();
-  //   }
-  // }
 
   void _removeLastSymbol() {
     var curText = _selectedController.text;
